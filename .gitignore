@@ -10,6 +10,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+temp_analyse/
+
 # C extensions
 *.so
 
