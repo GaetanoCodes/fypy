@@ -11,6 +11,8 @@ __pycache__/
 *$py.class
 
 temp_analyse/
+tempData/
+fypy/calibrate/utils_gaetano/
 
 # C extensions
 *.so
