@@ -15,10 +15,12 @@ __pycache__/
 temp_analyse/
 tempData/
 # to remove once done
-examples/execute_calibration_MSLevy/
-fypy/calibrate/calibrate_multi_section_levy
+# examples/execute_calibration_MSLevy/
+# fypy/calibrate/calibrate_multi_section_levy
 examples/visualization.py
 *.xlsx
+*.parquet
+*.png
 
 
 # C extensions
