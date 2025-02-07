@@ -10,9 +10,16 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+
+
 temp_analyse/
 tempData/
-fypy/calibrate/utils_gaetano/
+# to remove once done
+examples/execute_calibration_MSLevy/
+fypy/calibrate/calibrate_multi_section_levy
+examples/visualization.py
+*.xlsx
+
 
 # C extensions
 *.so
