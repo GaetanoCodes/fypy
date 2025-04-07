@@ -21,8 +21,7 @@ class ProjEuropeanPricer(ProjPricer):
         max_lws = np.log(np.max(K) / self._model.spot())
 
         cumulants = self._model.cumulants(T)
-        alph = cumulants.get_truncation_heuristic(L=self._L) if np.isnan(self._alpha_override) else self._alpha_override
-        alph = max(alph, 1.15 * max(np.abs(lws_vec)) + cumulants.c1)
+        alph = max(cumulants.get_truncation_heuristic(L=self._L), 1.15 * max(np.abs(lws_vec)) + cumulants.c1) if np.isnan(self._alpha_override) else self._alpha_override
 
         grid = {
             'dx': 2 * alph / (self._N - 1),
