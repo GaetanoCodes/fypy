@@ -9,6 +9,8 @@ from typing import Optional
 from fypy.pricing.StrikesPricer import StrikesPricer
 from fypy.calibrate.SabrModelCalibrator import SabrModelCalibrator
 from fypy.calibrate.calibrate_multi_section_levy.Color import COLOR
+from fypy.calibrate.calibrate_multi_section_levy.MarketInfo import FilterTTM
+
 
 # model dict wih **args then
 # TODO: Class that take a results (dict) and save it as csv Multi doss: time-> tickers
@@ -26,7 +28,7 @@ class Calibrator(MarketInfo):
     ):
         super().__init__(disc_path=disc_path, data_paths=data_paths, _verbose=verbose)
         self.model_names = model_names
-        self.precision = [1e-7]
+        self.precision = [1e-9]
         self.num_iter = 1
         self.results = self._get_empty_result()
         self.results_hanlder = ResultHandler()
@@ -44,7 +46,7 @@ class Calibrator(MarketInfo):
 
     def _calibrate_and_error(self, ticker: str, model_name: str, iter: int):
         iter=1
-        calibrated_params, pricer, init_guess = self._calibrate_model(
+        calibrated_params, pricer, init_guess, frozen_parameters, grid_values = self._calibrate_model(
             model_name, ticker
         )
 
@@ -56,33 +58,38 @@ class Calibrator(MarketInfo):
         print("Calibrated params : ", calibrated_params)
         print(calibrated_params)
         self._store_result(
-            ticker, model_name, iter, mape, rmse, calibrated_params, init_guess
+            ticker, model_name, iter, mape, rmse, calibrated_params, init_guess, frozen_parameters, grid_values
         )
         return
 
     def _calibrate_model(self, model_name: str, ticker: str):
         model = Model(model_name, self.fwds[ticker], self.disc_curve)
-        init_guess = model.random_guess()
+        #init_guess = model.random_guess()
+        init_guess = model.determined_guess(model_name=model_name,ticker=ticker)
+
         for ftol in self.precision:
             model.model.set_params(init_guess)
 
-            res, pricer = self._calibration(
+            res, pricer, frozen_parameters, grid_values = self._calibration(
                 model=model.model,
                 model_name=model._model_name,
                 surface=self.surfaces[ticker],
                 ftol=ftol,
             )
             calibrated_params = model.model.get_params()
-
-        return calibrated_params, pricer, init_guess#, res.optimality
+        print(f"\n\n\n CURRENT ALPHA: {pricer._alpha_override} | model= {model_name} | ticker = {ticker} \n\n\n")
+        return calibrated_params, pricer, init_guess, frozen_parameters, grid_values
 
     def _store_result(
-        self, ticker, model_name, iter, mape, rmse, cal_params, init_guess#, foc
+        self, ticker, model_name, iter, mape, rmse, cal_params, init_guess, frozen_parameters, grid_values#, foc
     ):
         self.results[ticker][model_name][iter]["score"]["MAPE"] = mape
         self.results[ticker][model_name][iter]["score"]["RMSE"] = rmse
         self.results[ticker][model_name][iter]["parameters"] = cal_params
         self.results[ticker][model_name][iter]["init_guess"] = init_guess
+        self.results[ticker][model_name][iter]["frozen_parameters"] = frozen_parameters
+        self.results[ticker][model_name][iter]["grid_values"] = grid_values
+
         #self.results[ticker][model_name][iter]["FOC"] = foc
         # print("FOC 3 ", self.results[ticker][model_name][iter]["FOC"], foc)
 
@@ -98,8 +105,9 @@ class Calibrator(MarketInfo):
             return SabrModelCalibrator(surface=surface).calibrate(
                 model=model, pricer=pricer
             )
+        reduced_surface=self.filter_market_surface_by_maturity(market_surface=surface)
         return MSLevyModelCalibrator(
-            surface=surface, do_vega_weight=True
+            surface=surface, reduced_surface=reduced_surface, do_vega_weight=True
         ).calibrate(model=model, pricer=pricer)
 
     def _get_empty_result(self) -> dict:
@@ -114,3 +122,15 @@ class Calibrator(MarketInfo):
                     "init_guess": None,
                 }
         return res
+
+
+    def filter_market_surface_by_maturity(self, market_surface: MarketSurface) -> MarketSurface:
+        """
+        Filters a MarketSurface to keep only slices with maturity up to max_maturity.
+
+        :param market_surface: MarketSurface, the original market surface.
+        :param max_maturity: float, the maximum time-to-maturity to keep.
+        :return: Filtered MarketSurface.
+        """
+        maturity_filter = FilterTTM(min_ttm=0.02, max_ttm=0.085)
+        return market_surface.filter_slices(slice_filter=maturity_filter)

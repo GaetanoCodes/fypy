@@ -37,6 +37,10 @@ class FilterTTM(SliceFilter):
         return True
 
 
+
+
+
+
 class MarketInfo(PathHandler):
     def __init__(
         self, disc_path: str, data_paths: dict, _verbose=True, OTM: bool = True
@@ -61,22 +65,37 @@ class MarketInfo(PathHandler):
         if self._verbose:
             print("* Getting surfaces:")
         surfaces = {}
-        for ticker, ticker_path in self._data_paths.items():
-            loader = YahooFinanceLoader()
-            surface = loader.load_from_file(
-                fpath=ticker_path, fit_discount=False, disc_curve=self.disc_curve
-            )
-            filt_surfaces = surface.filter_slices(
-                slice_filter=self._filters["slice"],
-                strike_filter=self._filters["strikes"],
-            )
-            surfaces[ticker] = filt_surfaces
+        from_file=True
+        if from_file:
+            for ticker, ticker_path in self._data_paths.items():
+                loader = YahooFinanceLoader()
+                surface = loader.load_from_file(
+                    fpath=ticker_path, fit_discount=False, disc_curve=self.disc_curve
+                )
+                filt_surfaces = surface.filter_slices(
+                    slice_filter=self._filters["slice"],
+                    strike_filter=self._filters["strikes"],
+                )
+                surfaces[ticker] = filt_surfaces
+        else:
+            for ticker, ticker_path in self._data_paths.items():
+                loader = YahooFinanceLoader()
+                df = loader.load_df_from_api(ticker=ticker, volume_filter=0)
+                df.to_csv(ticker_path, index=False)
+                surface = loader.load_from_file(ticker_path, fit_discount=False, disc_curve=self.disc_curve)
+
+                filt_surfaces = surface.filter_slices(
+                    slice_filter=self._filters["slice"],
+                    strike_filter=self._filters["strikes"],
+                )
+                surfaces[ticker] = filt_surfaces
+
         if self._verbose:
             COLOR.write("-done!", color="GREEN", indent=1)
         return surfaces
 
     def _get_filters(self):
-        filter = {"slice": FilterTTM(0.01, 1)}
+        filter = {"slice": FilterTTM(0.02, 1)}
         filter["strikes"] = StrikeFilters(
             filters=[
                 OTMStrikeFilter(),

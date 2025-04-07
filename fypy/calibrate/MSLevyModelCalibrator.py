@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 import numpy as np
 
 from fypy.calibrate.FourierModelCalibrator import FourierModelCalibrator
@@ -12,49 +12,111 @@ from fypy.pricing.fourier.ProjPricer import ProjPricer
 from fypy.pricing.fourier.ProjEuropeanPricer import ProjEuropeanPricer
 from fypy.fit.Minimizer import LeastSquares, Minimizer
 
-
 class MSLevyModelCalibrator(FourierModelCalibrator):
     def __init__(self,
                  surface: MarketSurface,
+                 reduced_surface: MarketSurface,
                  minimizer: Optional[Minimizer] = None,
                  do_vega_weight: bool = True):
         super(MSLevyModelCalibrator, self).__init__(surface=surface, minimizer=minimizer, do_vega_weight=do_vega_weight)
+        self._reduced_surface=reduced_surface
+        self._grid_values= {}
 
+
+
+    def calibrate_reduced_surface(self,
+                  model: FourierModel,
+                  ):
+
+
+        pricer = ProjEuropeanPricer(model=model,
+                                        N=2 ** 13,
+                                        L=20 if isinstance(model, _HestonBase) else 15,
+                                    alpha_override=20
+                                    )
+
+        # Full set of market target prices
+        target_prices, weights = self._make_reduced_targets()
+
+        # Reusable prices vector
+        all_prices = np.empty_like(target_prices, dtype=float)
+
+        def targets_pricer() -> np.ndarray:
+            # Function used to evaluate the model prices for each target
+            left = 0
+            for ttm, market_slice in self._reduced_surface.slices.items():
+                num_strikes = len(market_slice.strikes)
+                try:
+                    pricer.price_strikes_fill(T=ttm, K=market_slice.strikes, is_calls=market_slice.is_calls,
+                                              output=all_prices[left:left + num_strikes])
+                except Exception as e:
+                    print(f'Error getting pricies, filling with nan: {e}')
+                    for i in range(num_strikes):
+                        all_prices[left + i] = np.nan
+                left += num_strikes
+            return all_prices
+
+        # Create the claibrator for the model
+        calibrator = self._init_calibrator(model=model)
+
+        # Targets for the calibrator
+        if isinstance(model, LevyModel):
+            targets = TargetsWithSmallPriceErr(target_prices, targets_pricer, weights=weights,
+                                               small_price_penalty_mult=10)
+        else:
+            targets = TargetsWithSmallPriceErr(target_prices, targets_pricer, weights=weights,
+                                               small_price_penalty_mult=3)
+        calibrator.add_objective("Targets", targets)
+
+        result = self._calibrate(calibrator)
+
+        model_prices = targets_pricer()
+        return result, pricer, model_prices, target_prices
 
     def calibrate(self, model: LevyModel, pricer: Optional[ProjPricer] = None)-> Tuple:
+
+        result, pricer, _, _= self.calibrate_reduced_surface(model=model)
+        print(f"\n\n\n CURRENT ALPHA: {pricer._alpha_override} \n\n\n")
+
         model.set_multi_section(multi_section=True)
+        pricer.get_model().update_frozen_params(T=0.085, parameters=result.params, alph=pricer.get_alpha_override(), N=pricer.get_N())
+        self._store_grid_values(slice=False, pricer=pricer)
 
-        # If no pricer is provided, create a default one
-        pricer = pricer or ProjEuropeanPricer(
-            model=model, N=2 ** 12, L=20 if isinstance(model, _HestonBase) else 15
-        )
 
-        slices_list = list(self.surface.slices.items())
-        # Number of initial slices for which a higher minimization-precision is required
-        first_slices_index = max(1, int(len(slices_list) * 0.3))
-
-        # First stage: calibrate initial maturities with higher precision
-        self._multiple_slice_calibration(model, pricer, slices_list[:first_slices_index], high_precision=True)
+        remaining_slices = {maturity: market_slice for maturity, market_slice in self.surface.slices.items() if maturity > 0.085}
 
         # Second stage: calibrate remaining maturities with lower precision
-        self._multiple_slice_calibration(model, pricer, slices_list[first_slices_index:-1], high_precision=False)
+        self._multiple_slice_calibration(model, pricer, remaining_slices, high_precision=True)
 
         # Last slice is calibrated separately without updating frozen parameters
+        slices_list = list(self.surface.slices.items())
         maturity, market_slice = slices_list[-1]
-        result, pricer = self._single_slice_calibration(model, maturity, market_slice, pricer)
-        return result, pricer
+        result, pricer = self._single_slice_calibration(model, maturity, market_slice, pricer, update_frozen_params=False)
 
-    def _multiple_slice_calibration(self, model: LevyModel, pricer: ProjPricer, slices: list, high_precision: bool)->None:
+
+
+        return result, pricer, pricer.get_model()._frozen_params, self._grid_values
+
+
+
+    def _store_grid_values(self, slice:bool, pricer:ProjPricer, market_slice: Optional[MarketSlice]=None):
+        if slice:
+            self._grid_values[market_slice.T]= pricer.get_grid_values(T=market_slice.T, K=market_slice.strikes)
+        else:
+            for maturity, market_slice in self._reduced_surface.slices.items():
+                self._grid_values[maturity]= pricer.get_grid_values(T=market_slice.T, K=market_slice.strikes)
+
+
+    def _multiple_slice_calibration(self, model: LevyModel, pricer: ProjPricer, slices: Dict, high_precision: bool)-> None:
         """ Calibrates a set of market slices, updating frozen parameters accordingly. """
 
-        self._minimizer_precision(high_precision=high_precision)
+        self._minimizer_precision(high_precision=False)
 
-        for maturity, market_slice in slices:
-            result, pricer = self._single_slice_calibration(model, maturity, market_slice, pricer)
-            pricer.get_model().update_frozen_params(maturity=maturity, parameters=result.params)
+        for maturity, market_slice in slices.items():
+            _, _ = self._single_slice_calibration(model, maturity, market_slice, pricer)
 
     def _single_slice_calibration(self, model: FourierModel, maturity: float, market_slice: MarketSlice,
-                                 pricer: Optional[ProjPricer] = None):
+                                 pricer: Optional[ProjPricer] = None, update_frozen_params:bool=True):
         """
         Performs calibration for a single tenor.
         """
@@ -71,19 +133,27 @@ class MSLevyModelCalibrator(FourierModelCalibrator):
 
         # Get the model prices after calibration
         #model_prices = targets_pricer()
+        #update frozen params
+        if update_frozen_params:
+            pricer.get_model().update_frozen_params(T=maturity, parameters=result.params, alph=pricer.get_alpha_override(), N=pricer.get_N())
+            self._store_grid_values(slice=True, pricer=pricer,market_slice=market_slice)
 
         return result, pricer #, model_prices, target_prices
 
 
-    def _minimizer_precision(self, high_precision:bool=False)->None:
-        self._minimizer= LeastSquares(max_nfev=1000, ftol=1e-10, xtol=1e-10, gtol=1e-10, verbose=1) if high_precision else LeastSquares(max_nfev=120, ftol=1e-07, xtol=1e-07, gtol=1e-07, verbose=1)
+
+
+
+
+    def _minimizer_precision(self, high_precision: bool = False)-> None:
+        self._minimizer= LeastSquares(max_nfev=1000, ftol=1e-10, xtol=1e-10, gtol=1e-10, verbose=1) if high_precision else LeastSquares(max_nfev=1000, ftol=1e-08, xtol=1e-08, gtol=1e-08, verbose=1)
 
     def _prepare_targets_and_pricer(self, maturity: float, market_slice: MarketSlice, pricer: ProjPricer):
         """
         Prepares market targets, weights, and the targets pricer function.
         """
         # Generate the full set of market target prices and weights for the single slice
-        target_prices, weights = self._make_all_targets(market_slice=market_slice)
+        target_prices, weights = self._make_all_targets_MSlevy(market_slice=market_slice)
 
         # Create a reusable vector for calculated prices
         all_prices = np.empty_like(target_prices, dtype=float)
@@ -120,8 +190,7 @@ class MSLevyModelCalibrator(FourierModelCalibrator):
         return calibrator
 
 
-
-    def _make_all_targets(self, market_slice: MarketSlice=None) -> Tuple[np.ndarray, np.ndarray]:
+    def _make_all_targets_MSlevy(self, market_slice: MarketSlice=None) -> Tuple[np.ndarray, np.ndarray]:
         target_prices = []
         weights = []
 
@@ -137,3 +206,20 @@ class MSLevyModelCalibrator(FourierModelCalibrator):
 
         return target_prices, weights
 
+
+    def _make_reduced_targets(self) -> Tuple[np.ndarray, np.ndarray]:
+        target_prices = []
+        weights = []
+
+        for ttm, market_slice in self._reduced_surface.slices.items():
+            # push back the target prices to fit to
+            target_prices.append(market_slice.mid_prices)
+
+            # Use inverse vega weighting
+            weights.append(self._make_weights(market_slice))
+
+        # Full set of market target prices
+        target_prices = np.concatenate(target_prices)
+        weights = np.concatenate(weights)
+
+        return target_prices, weights

@@ -79,30 +79,7 @@ class LevyModel(FourierModel, ABC):
 
         return self._compute_frozen_chf(T=T, xi=xi)
 
-    def _compute_frozen_chf(self, T: float, xi: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
-        """
-        Computes the characteristic function for multi-section Levy models, iterating over the frozen parameters.
 
-        :param T: Time up to which we compute the characteristic function
-        :param xi: Points in the frequency domain
-        :return: Characteristic function evaluated at the given points
-        """
-        # TODO : Store CHF values along the grid instead of recomputing them each time
-        T_previous = 0
-        chf_value = 1.0
-
-        for frozen_maturity, frozen_params in sorted(self._frozen_params.items()):
-            # TODO : Double-check self._last_tenor case
-            if T < frozen_maturity:
-                with self.temporary_params(frozen_params):
-                    return np.exp((T - T_previous) * self.symbol(xi)) * chf_value
-
-            with self.temporary_params(frozen_params):
-                chf_value *= np.exp((frozen_maturity - T_previous) * self.symbol(xi))
-
-            T_previous = frozen_maturity
-
-        return chf_value
 
 
 
@@ -116,20 +93,29 @@ class LevyModel(FourierModel, ABC):
         self._is_multi_section = multi_section
         if multi_section:
             self._frozen_params = frozen_params if frozen_params else {}
+            self._frozen_values = {}
             self._last_tenor= max(self._frozen_params) if frozen_params else 0
             self.chf = self._chf_multi_section
         else:
             self._frozen_params = None # In case the object was previously created as multi-section
+            self._frozen_values = None
             self.chf = self._chf_levy
 
-    def update_frozen_params(self, maturity:float, parameters:list):
+    def update_frozen_params(self, T:float, parameters:list, alph:float , N:int):
         if self._is_multi_section:
-            self._frozen_params[maturity]=parameters
+            self._frozen_params[T]=parameters
             self._last_tenor= max(self._frozen_params)
+            self.update_frozen_chf_values(T=T, alph=alph, N=N)
         else:
             TypeError("Lévy Model is not a multi-section one")
 
 
+    def update_frozen_chf_values(self, T: float, alph:float , N:int):
+        dx= 2 * alph / (N - 1)
+        xi = (2 * np.pi / (N * dx)) * np.arange(0, N)
+        maturities = [maturity for maturity in self._frozen_values.keys() if maturity < T]
+        T_previous= max(maturities) if maturities else 0
+        self._frozen_values[T] = np.array(np.exp((T - T_previous) * self.symbol(xi[1:])))
     def risk_neutral_log_drift(self) -> float:
         """ Compute the risk-neutral drift of log process """
         return self.forwardCurve.drift(0, 1) + self.convexity_correction()
@@ -163,6 +149,33 @@ class LevyModel(FourierModel, ABC):
         finally:
             # Restore the original parameters after the context is done
             self.set_params(original_params)
+
+
+
+
+    def _compute_frozen_chf(self, T: float, xi: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
+        """
+        Computes the characteristic function for multi-section Levy models, iterating over the frozen parameters.
+
+        :param T: Time up to which we compute the characteristic function
+        :param xi: Points in the frequency domain
+        :return: Characteristic function evaluated at the given points
+        """
+
+        T_previous = 0
+        chf_value = 1.0
+
+        for frozen_maturity, frozen_params in sorted(self._frozen_params.items()):
+            if T < frozen_maturity:
+                with self.temporary_params(frozen_params):
+                    return np.exp((T - T_previous) * self.symbol(xi)) * chf_value
+
+            #with self.temporary_params(frozen_params):
+            chf_value *= self._frozen_values[frozen_maturity]
+
+            T_previous = frozen_maturity
+
+        return chf_value
 
 
 
