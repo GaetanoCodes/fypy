@@ -41,6 +41,9 @@ class ProjPricer(StrikesPricer):
     def get_alpha_override(self):
         return self._alpha_override
 
+    def set_alpha_override(self, alpha_override:float):
+        self._alpha_override=alpha_override
+
     def get_L(self):
         return self._L
 

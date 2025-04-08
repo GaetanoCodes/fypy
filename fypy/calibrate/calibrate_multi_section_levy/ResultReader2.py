@@ -54,13 +54,9 @@ class ResultsContainer:
     def _get_results(self) -> pd.DataFrame:
         print(os.getcwd())
         df = pd.read_parquet(self._res_path + "/res.parquet")
-        df = df[["Ticker", "Model", "Iter", "MAPE", "RMSE", "Params", "Guess"]]
+        df = df[["Ticker", "Model", "MAPE", "RMSE", "Params", "Guess"]]
         return df
 
-    # def _get_best_results(self):
-    #     idx = self._results_df.groupby(["Ticker", "Model"])["MAPE"].idxmin()
-    #     df = self._results_df.loc[idx]
-    #     return df
     def _get_best_results(self):
         # Get the index of the minimum MAPE value for each (Ticker, Model) group
         idx = self._results_df.groupby(["Ticker", "Model"])["MAPE"].idxmin()

@@ -1,13 +1,8 @@
 import pandas as pd
-import numpy as np
 
 from fypy.calibrate.calibrate_multi_section_levy.PathHandler import PathHandler
 from fypy.calibrate.calibrate_multi_section_levy.MarketInfo import MarketInfo
-from fypy.calibrate.calibrate_multi_section_levy.Model import Model
-from fypy.pricing.fourier.ProjEuropeanPricer import ProjEuropeanPricer
-from fypy.model.sv.Heston import _HestonBase
-import ast
-import matplotlib.pyplot as plt
+
 from fypy.calibrate.calibrate_multi_section_levy.IVHandler import IVHandler
 
 # TODO IV Handler (marketinfo, results)

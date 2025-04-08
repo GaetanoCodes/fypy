@@ -101,21 +101,22 @@ class LevyModel(FourierModel, ABC):
             self._frozen_values = None
             self.chf = self._chf_levy
 
-    def update_frozen_params(self, T:float, parameters:list, alph:float , N:int):
+    def update_frozen_values(self, T:float, parameters:list, alph:float , N:int):
         if self._is_multi_section:
             self._frozen_params[T]=parameters
             self._last_tenor= max(self._frozen_params)
-            self.update_frozen_chf_values(T=T, alph=alph, N=N)
+            self._compute_frozen_chf_values(T=T, alph=alph, N=N)
         else:
             TypeError("Lévy Model is not a multi-section one")
 
 
-    def update_frozen_chf_values(self, T: float, alph:float , N:int):
+    def _compute_frozen_chf_values(self, T: float, alph:float , N:int):
         dx= 2 * alph / (N - 1)
         xi = (2 * np.pi / (N * dx)) * np.arange(0, N)
         maturities = [maturity for maturity in self._frozen_values.keys() if maturity < T]
         T_previous= max(maturities) if maturities else 0
         self._frozen_values[T] = np.array(np.exp((T - T_previous) * self.symbol(xi[1:])))
+
     def risk_neutral_log_drift(self) -> float:
         """ Compute the risk-neutral drift of log process """
         return self.forwardCurve.drift(0, 1) + self.convexity_correction()

@@ -33,7 +33,7 @@ class FourierModelCalibrator(BaseModelCalibrator):
                                         L=20 if isinstance(model, _HestonBase) else 15)
 
         # Full set of market target prices
-        target_prices, weights = self._make_all_targets()
+        target_prices, weights = self._make_all_targets(surface=self.surface)
 
         # Reusable prices vector
         all_prices = np.empty_like(target_prices, dtype=float)
@@ -84,11 +84,11 @@ class FourierModelCalibrator(BaseModelCalibrator):
             black76_vega(F, market_slice.strikes, market_slice.mid_vols, disc=disc, T=ttm),
             atm_vega / 200)
 
-    def _make_all_targets(self) -> Tuple[np.ndarray, np.ndarray]:
+    def _make_all_targets(self, surface: MarketSurface) -> Tuple[np.ndarray, np.ndarray]:
         target_prices = []
         weights = []
 
-        for ttm, market_slice in self.surface.slices.items():
+        for ttm, market_slice in surface.slices.items():
             # push back the target prices to fit to
             target_prices.append(market_slice.mid_prices)
 
