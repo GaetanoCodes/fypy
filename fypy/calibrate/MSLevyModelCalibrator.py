@@ -30,11 +30,16 @@ class MSLevyModelCalibrator(FourierModelCalibrator):
 
 
     def calibrate(self, model: LevyModel, pricer: Optional[ProjPricer] = None)-> Tuple:
+        """
+        Calibrates the given Levy model to the market surface in three stages:
+        1) It first calibrates the model to a reduced subset of maturities (within a specified range).
+        2) Next, it iterates through and calibrates each of the remaining slices.
+        3) Finally, it calibrates the last slice separately without updating the model's frozen parameters.
 
+        """
         result, pricer= self._calibrate_reduced_surface(model=model, pricer=pricer)
         remaining_slices = {maturity: market_slice for maturity, market_slice in self.surface.slices.items() if maturity > self._reduced_surface_range[1]}
 
-        # Second stage: calibrate remaining maturities with lower precision
         self._multiple_slice_calibration(model, pricer, remaining_slices)
 
         # Last slice is calibrated separately without updating frozen parameters
@@ -70,7 +75,6 @@ class MSLevyModelCalibrator(FourierModelCalibrator):
             model: The model to calibrate.
             pricer: A pre-configured pricer (should not be None).
             target_preparation_fn: Function that returns (target_prices, weights, targets_pricer).
-            update_model_fn: Function to update the model after calibration (optional).
 
         Returns:
             Tuple of (CalibrationResult, pricer)
@@ -148,7 +152,17 @@ class MSLevyModelCalibrator(FourierModelCalibrator):
             get_targets_fn: Callable[[], Tuple[np.ndarray, np.ndarray]],
             pricing_fn: Callable[[np.ndarray], None]
     ):
+        """
+        Prepares and returns the necessary components for calibration:
+        1) Retrieves target prices and corresponding weights from a user-provided function.
+        2) Creates an output array to store computed prices and defines a pricing function
+           that fills this array (handling errors by inserting NaN values).
 
+        Returns:
+            A tuple (target_prices, weights, targets_pricer) where:
+              - target_prices: Market prices serving as calibration targets.
+              - weights: Weighting vector (e.g., inverse vega) to emphasize certain strikes.
+        """
         target_prices, weights = get_targets_fn()
         all_prices = np.empty_like(target_prices, dtype=float)
 
