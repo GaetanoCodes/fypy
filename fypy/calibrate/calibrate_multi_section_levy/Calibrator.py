@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Dict
 
 from examples.visualization import calculate_error_metrics
 from fypy.calibrate.MSLevyModelCalibrator import MSLevyModelCalibrator
@@ -19,14 +19,15 @@ class Calibrator(MarketInfo):
             model_names: list[str],
             disc_path: str,
             data_paths: dict,
-            init_guess_random : bool = False,
+            init_guess: Dict = None,
             verbose: bool = True,
+
     ):
         super().__init__(disc_path=disc_path, data_paths=data_paths, _verbose=verbose)
         self.model_names = model_names
         self.results = self._get_empty_result()
         self.results_hanlder = ResultHandler()
-        self.init_guess_random = init_guess_random
+        self._init_guess = init_guess
 
     def calibrate(self):
         for ticker in self.tickers:
@@ -56,8 +57,10 @@ class Calibrator(MarketInfo):
 
     def _calibrate_model(self, model_name: str, ticker: str):
         model = Model(model_name, self.fwds[ticker], self.disc_curve)
-        init_guess = model.determined_guess(model_name=model_name, ticker=ticker) if self.init_guess_random==False else model.random_guess()
 
+        init_guess = model.random_guess() if self._init_guess is None else model.deterministic_guess(model_name=model_name,
+                                                                                                  ticker=ticker,
+                                                                                                  init_guess=self._init_guess)
         model.model.set_params(init_guess)
 
         res, pricer, frozen_parameters = self._calibration(
@@ -99,5 +102,3 @@ class Calibrator(MarketInfo):
             for model in self.model_names:
                 res[ticker][model] = {}
         return res
-
-
